@@ -217,10 +217,10 @@ class SetupXDGDesktop(AbstractSetup):
                 src = srcpath / f
                 if src.suffix == ".desktop":
                     application_dir = self.datadir / "applications"
-                    dst = application_dir / f"{const.APP_ICON}.desktop"
+                    dst = application_dir / f"{const.APPLICATION_ID}.desktop"
                     templateData = {
                         "gui_bin": exePath().parent / const.BASE_EXE_GUI,
-                        "APP_ICON": const.APP_ICON,
+                        "APPLICATION_ID": const.APPLICATION_ID,
                     }
                     srcTemplate = Template(src.read_text())
                     print("Installing", dst)
@@ -231,13 +231,13 @@ class SetupXDGDesktop(AbstractSetup):
                     size_suffix = src.suffixes[-2]
                     assert size_suffix.startswith(".")
                     size = int(size_suffix[1:], 10)
-                    dst = self.icondir(size) / f"{const.APP_ICON}.png"
+                    dst = self.icondir(size) / f"{const.APPLICATION_ID}.png"
                     print("Installing", dst)
                     dst.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
                     shutil.copy(src, dst)
                     dst.chmod(mode=0o644)
                 elif src.suffix == ".svg":
-                    dst = self.icondir() / f"{const.APP_ICON}.svg"
+                    dst = self.icondir() / f"{const.APPLICATION_ID}.svg"
                     print("Installing", dst)
                     dst.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
                     shutil.copy(src, dst)
@@ -251,7 +251,7 @@ class SetupXDGDesktop(AbstractSetup):
                 src = srcpath / f
                 if src.suffix == ".desktop":
                     application_dir = self.datadir / "applications"
-                    dst = application_dir / f"{const.APP_ICON}.desktop"
+                    dst = application_dir / f"{const.APPLICATION_ID}.desktop"
                     print(f"Uninstalling {dst}")
                     try:
                         dst.unlink()
@@ -261,14 +261,14 @@ class SetupXDGDesktop(AbstractSetup):
                     size_suffix = src.suffixes[-2]
                     assert size_suffix.startswith(".")
                     size = int(size_suffix[1:], 10)
-                    dst = self.icondir(size) / f"{const.APP_ICON}.png"
+                    dst = self.icondir(size) / f"{const.APPLICATION_ID}.png"
                     print(f"Uninstalling {dst}")
                     try:
                         dst.unlink()
                     except FileNotFoundError:
                         pass  # No dst file to remove
                 elif src.suffix == ".svg":
-                    dst = self.icondir() / f"{const.APP_ICON}.svg"
+                    dst = self.icondir() / f"{const.APPLICATION_ID}.svg"
                     print(f"Uninstalling {dst}")
                     try:
                         dst.unlink()
