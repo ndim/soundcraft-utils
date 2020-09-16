@@ -551,6 +551,74 @@ done""",
         self.emit_code_for_rule_change(skip_if=(new_content == old_content))
 
 
+class SetupObsoleteInstall(AbstractSetup):
+    """Subsystem trying to clean up leftovers from old installs"""
+
+    def install(self):
+        self.check_install()
+
+    def uninstall(self):
+        self.check_install()
+
+    def check_install(self):
+        dirs = get_dirs()
+        if not dirs.chroot:
+            self.stop_system_bus_service()
+            self.remove_obsolete_files()
+
+    def stop_system_bus_service(self):
+        """Stop the obsolete system bus service"""
+        print("Stopping obsolete D-Bus service on the system bus (when possible)")
+
+        old_busname = "soundcraft.utils"
+        bus = pydbus.SystemBus()
+        dbus_service = bus.get(".DBus")
+        if not dbus_service.NameHasOwner(old_busname):
+            print("Obsolete system D-Bus service is not running.")
+        else:
+            bus.get(old_busname).Shutdown()
+            print("Stopped obsolete system D-Bus service.")
+
+    def remove_obsolete_files(self):
+        """Remove obsolete files from older installations"""
+        print("Remove obsolete files from older installations")
+
+        old_statedir = Path("/var/lib/soundcraft-utils")
+        SUDO_SCRIPT.add_cmd(
+            f"rmdir {old_statedir}",
+            skip_if=not old_statedir.is_dir(),
+            comment="Remove obsolete state directory (if empty)",
+        )
+
+        # Old installs always installed into "/usr/share/dbus-1".
+        old_dbus1dir = Path("/usr/share/dbus-1")
+        obsolete_files = [
+            old_dbus1dir / "system.d/soundcraft-utils.conf",
+            old_dbus1dir / "system-services/soundcraft.utils.notepad.service",
+            Path("/usr/local/bin") / const.OLD_BASE_EXE_SERVICE,
+            Path("/usr/bin") / const.OLD_BASE_EXE_SERVICE,
+        ]
+        files_to_delete = []
+        files_to_skip = []
+        for f in obsolete_files:
+            if f.exists():
+                files_to_delete.append(str(f))
+            else:
+                files_to_skip.append(str(f))
+        delete_str = " ".join(files_to_delete)
+        skip_str = " ".join(files_to_skip)
+        if files_to_delete:
+            SUDO_SCRIPT.add_cmd(
+                f"rm -f {delete_str}",
+                comment="Remove obsolete system D-Bus service config and script files (from pre-0.5.0)",
+            )
+        if files_to_skip:
+            SUDO_SCRIPT.add_cmd(
+                f"rm -f {skip_str}",
+                comment="Remove obsolete system D-Bus service config and script files (from pre-0.5.0)",
+            )
+
+
 class SetupEverything(AbstractSetup):
     """Groups all subsystem setup tasks"""
 
@@ -632,6 +700,7 @@ def main():
     print("Using dirs", dirs)
 
     everything = SetupEverything()
+    everything.add(SetupObsoleteInstall())
     everything.add(SetupDBus(no_launch=args.no_launch))
     everything.add(SetupXDGDesktop())
     everything.add(SetupUdevRules())
