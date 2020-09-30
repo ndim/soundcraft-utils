@@ -24,6 +24,7 @@
 import abc
 import argparse
 import io
+import re
 import shutil
 import sys
 import time
@@ -258,6 +259,32 @@ class AbstractSetup(metaclass=abc.ABCMeta):
 class FileSetup(AbstractSetup):
     """A subsystem which needs to install a number of files"""
 
+    @staticmethod
+    def int_as_str(thing):
+        """Help sorting numbers
+
+        Help with sorting numbers by converting every integer to a fixed
+        length string starting with leading zeros to make alphabetical
+        sorting sort numerically.
+        """
+        try:
+            i = int(thing)
+            return "%08d" % i
+        except ValueError:
+            return thing
+
+    # Help with sorting numbers inside path elements
+    destfile_key_re = re.compile(r"((?<=\d)(?=\D)|(?<=\D)(?=\d))")
+
+    @staticmethod
+    def destfile_key(file):
+        """Convert a Path() to something which sorts as a alphabetical/numerical hybrid"""
+        path = file.dst
+        return tuple(
+            tuple(map(FileSetup.int_as_str, FileSetup.destfile_key_re.split(s)))
+            for s in path.parts
+        )
+
     def __init__(self):
         super(FileSetup, self).__init__()
         self.files = []
@@ -266,11 +293,11 @@ class FileSetup(AbstractSetup):
         self.files.append(file)
 
     def install(self):
-        for file in self.files:
+        for file in sorted(self.files, key=FileSetup.destfile_key):
             file.install()
 
     def uninstall(self):
-        for file in reversed(self.files):
+        for file in sorted(self.files, key=FileSetup.destfile_key, reverse=True):
             file.uninstall()
 
 
@@ -280,7 +307,7 @@ class DataFileSetup(FileSetup):
     def walk_through_data_files(self, subdir):
         sources = findDataFiles(subdir)
         for (srcpath, files) in sources.items():
-            for f in sorted(files):
+            for f in files:
                 src = srcpath / f
                 ssrc = str(src)
                 if ssrc[-1] == "~":
