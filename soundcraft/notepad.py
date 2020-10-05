@@ -26,6 +26,8 @@ import os
 
 import usb.core
 
+import soundcraft.constants as const
+
 
 DEFAULT_STATEDIR = "/var/lib/soundcraft-utils"
 HARMAN_USB = 0x05FC
@@ -146,7 +148,7 @@ def stereo_label(base):
 class Notepad_12fx(NotepadBase):
     def __init__(self, **kwargs):
         super().__init__(
-            idProduct=0x0032,
+            idProduct=const.PRODUCT_ID_NOTEPAD_12FX,
             routingTarget=("capture_3", "capture_4"),
             fixedRouting=[(("capture_1", "capture_2"), ("Mic/Line 1", "Mic/Line 2"))],
             **kwargs,
@@ -169,7 +171,9 @@ class Notepad_12fx(NotepadBase):
 class Notepad_8fx(NotepadBase):
     def __init__(self, **kwargs):
         super().__init__(
-            idProduct=0x0031, routingTarget=("capture_1", "capture_2"), **kwargs
+            idProduct=const.PRODUCT_ID_NOTEPAD_8FX,
+            routingTarget=("capture_1", "capture_2"),
+            **kwargs,
         )
 
     class Sources(enum.IntEnum):
@@ -189,7 +193,9 @@ class Notepad_8fx(NotepadBase):
 class Notepad_5(NotepadBase):
     def __init__(self, **kwargs):
         super().__init__(
-            idProduct=0x0030, routingTarget=("capture_1", "capture_2"), **kwargs
+            idProduct=const.PRODUCT_ID_NOTEPAD_5,
+            routingTarget=("capture_1", "capture_2"),
+            **kwargs,
         )
 
     class Sources(enum.IntEnum):
