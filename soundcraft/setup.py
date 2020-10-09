@@ -183,31 +183,60 @@ class FileSetup(AbstractSetup):
             file.uninstall()
 
 
-class SetupDBus(FileSetup):
+class DataFileSetup(FileSetup):
+    """Some setup which iterates through files in data/"""
+
+    def walk_through_data_files(self, subdir):
+        sources = findDataFiles(subdir)
+        for (srcpath, files) in sources.items():
+            for f in sorted(files):
+                src = srcpath / f
+                ssrc = str(src)
+                if ssrc[-1] == "~":
+                    continue  # ignore backup files ending with a tilde
+                self.add_src(src)
+
+    @abc.abstractmethod
+    def add_src(self, src):
+        """Examine src file and decide what to do about it
+
+        Examine the given source file ``src`` and then decide whether
+        to
+
+          * ``self.add_file()`` an instance of ``AbstractFile``
+          * ``raise UnhandledDataFile(src)``
+        """
+        pass  # DataFileSetup.add_src()
+
+
+class UnhandledDataFile(Exception):
+    """Unhandled data file encountered while walking through data tree"""
+
+    pass  # class UnhandledDataFile
+
+
+class SetupDBus(DataFileSetup):
     """Subsystem dealing with the D-Bus configuration files"""
 
     def __init__(self):
         super(SetupDBus, self).__init__()
+        self.walk_through_data_files("dbus-1")
 
+    def add_src(self, src):
         dirs = get_dirs()
+        if src.suffix == ".service":
+            templateData = {
+                "dbus_service_bin": str(dirs.serviceExePath),
+                "busname": const.BUSNAME,
+            }
 
-        service_dir = dirs.datadir / "dbus-1/services"
-        service_dst = service_dir / f"{const.BUSNAME}.service"
+            service_dir = dirs.datadir / "dbus-1/services"
+            service_dst = service_dir / f"{const.BUSNAME}.service"
 
-        templateData = {
-            "dbus_service_bin": str(dirs.serviceExePath),
-            "busname": const.BUSNAME,
-        }
-
-        sources = findDataFiles("dbus-1")
-        for (srcpath, files) in sources.items():
-            for f in files:
-                src = srcpath / f
-                if src.suffix == ".service":
-                    service_file = TemplateFile(
-                        service_dst, src, template_data=templateData
-                    )
-                    self.add_file(service_file)
+            service_file = TemplateFile(service_dst, src, template_data=templateData)
+            self.add_file(service_file)
+        else:
+            raise UnhandledDataFile(src)
 
     def install(self):
         super(SetupDBus, self).install()
@@ -266,7 +295,7 @@ class SetupDBus(FileSetup):
         print("D-Bus service is unregistered")
 
 
-class SetupXDGDesktop(FileSetup):
+class SetupXDGDesktop(DataFileSetup):
     """Subsystem dealing with the XDG desktop and icon files"""
 
     # FIXME05: Find out whether `xdg-desktop-menu` and `xdg-desktop-icon`
@@ -274,33 +303,29 @@ class SetupXDGDesktop(FileSetup):
 
     def __init__(self):
         super(SetupXDGDesktop, self).__init__()
+        self.walk_through_data_files("xdg")
 
+    def add_src(self, src):
         dirs = get_dirs()
-
-        templateData = {
-            "gui_bin": dirs.guiExePath,
-            "APPLICATION_ID": const.APPLICATION_ID,
-        }
-
-        sources = findDataFiles("xdg")
-        for (srcpath, files) in sources.items():
-            for f in files:
-                src = srcpath / f
-                if src.suffix == ".desktop":
-                    applications_dir = dirs.datadir / "applications"
-                    dst = applications_dir / f"{const.APPLICATION_ID}.desktop"
-                    self.add_file(TemplateFile(dst, src, templateData))
-                elif src.suffix == ".png":
-                    size_suffix = src.suffixes[-2]
-                    assert size_suffix.startswith(".")
-                    size = int(size_suffix[1:], 10)
-                    dst = self.icondir(size) / f"{const.APPLICATION_ID}.png"
-                    self.add_file(CopyFile(dst, src))
-                elif src.suffix == ".svg":
-                    dst = self.icondir() / f"{const.APPLICATION_ID}.svg"
-                    self.add_file(CopyFile(dst, src))
-                else:
-                    raise ValueError("Unhandled XDG source file {f}")
+        if src.suffix == ".desktop":
+            applications_dir = dirs.datadir / "applications"
+            dst = applications_dir / f"{const.APPLICATION_ID}.desktop"
+            templateData = {
+                "gui_bin": dirs.guiExePath,
+                "APPLICATION_ID": const.APPLICATION_ID,
+            }
+            self.add_file(TemplateFile(dst, src, templateData))
+        elif src.suffix == ".png":
+            size_suffix = src.suffixes[-2]
+            assert size_suffix.startswith(".")
+            size = int(size_suffix[1:], 10)
+            dst = self.icondir(size) / f"{const.APPLICATION_ID}.png"
+            self.add_file(CopyFile(dst, src))
+        elif src.suffix == ".svg":
+            dst = self.icondir() / f"{const.APPLICATION_ID}.svg"
+            self.add_file(CopyFile(dst, src))
+        else:
+            raise UnhandledDataFile(src)
 
     def install(self):
         super(SetupXDGDesktop, self).install()
