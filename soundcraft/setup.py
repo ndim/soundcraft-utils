@@ -24,7 +24,6 @@
 import abc
 import argparse
 import shutil
-import sys
 import time
 from pathlib import Path
 from string import Template
@@ -51,6 +50,8 @@ import soundcraft
 
 import soundcraft.constants as const
 
+from soundcraft.dirs import exePath, find_datadir, serviceExePath
+
 
 def findDataFiles(subdir):
     """Walk through data files in the soundcraft module's ``data`` subdir``"""
@@ -66,45 +67,6 @@ def findDataFiles(subdir):
                 continue  # ignore directories
             result[datapath].append(f.relative_to(datapath))
     return result
-
-
-def serviceExePath():
-    return exePath().parent / const.BASE_EXE_SERVICE
-
-
-def exePath():
-    exename = Path(sys.argv[0]).resolve()
-    if exename.suffix == ".py":
-        raise ValueError(
-            "Running setup out of a module-based execution is not supported"
-        )
-    return exename
-
-
-def find_datadir():
-    exe_path = exePath()
-    # print("exe_path", exe_path)
-    for prefix in [Path("/usr/local"), Path("/usr"), Path("~/.local").expanduser()]:
-        for sx_dir in ["bin", "sbin", "libexec"]:
-            for sx in [const.BASE_EXE_SETUP]:
-                sx_path = prefix / sx_dir / sx
-                # print("sx_path", sx_path)
-                if sx_path == exe_path:
-                    return prefix / "share"
-                try:
-                    exe_path.relative_to(prefix)  # ignore result
-
-                    # If this is
-                    # ``/home/user/.local/share/virtualenvs/soundcraft-utils-ABCDEFG/bin/soundcraft_setup``,
-                    # then the D-Bus and XDG config can either go into
-                    # ``/home/user/.local/share/virtualenvs/soundcraft-utils-ABCDEFG/share/``
-                    # and be ignored, or go into
-                    # ``/home/user/.local/share/`` and work. We choose
-                    # the latter.
-                    return prefix / "share"
-                except ValueError:
-                    pass  # exe_path is not a subdir of prefix
-    raise ValueError(f"Exe path is not supported: {exe_path!r}")
 
 
 class AbstractSetup(metaclass=abc.ABCMeta):
