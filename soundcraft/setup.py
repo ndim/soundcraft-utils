@@ -140,16 +140,29 @@ def findDataFiles(subdir):
 class AbstractFile(metaclass=abc.ABCMeta):
     """Common behaviour for different types of files defined as Subclasses"""
 
-    def __init__(self, dst):
+    def __init__(self, dst, comment=None):
         super(AbstractFile, self).__init__()
         self.__dst = Path(dst)
+        self.__comment = comment
+
+    @property
+    def comment(self):
+        if self.__comment:
+            return self.__comment
+        else:
+            return f"{self}"
+
+    def __str__(self):
+        return f"{self.__class__.__name__}:{self.dst}"
 
     @property
     def dst(self):
+        """Destination Path() (not chrooted)"""
         return self.__dst
 
     @property
     def chroot_dst(self):
+        """Destination Path() (chrooted if applicable)"""
         chroot = get_dirs().chroot
         if chroot:
             return Path(f"{chroot}{self.dst}")
@@ -157,75 +170,102 @@ class AbstractFile(metaclass=abc.ABCMeta):
             return self.dst
 
     @abc.abstractmethod
-    def install(self):
-        pass  # AbstractFile.install()
+    def direct_install(self):
+        """Install this file directly from Python code"""
+        pass  # AbstractFile.direct_install()
 
-    def uninstall(self):
-        # Like many other install/uninstall tools, we just remove the
-        # file and leave the directory tree around.
-        self.uninstall_msg(self.dst)
+    @abc.abstractmethod
+    def shell_install(self):
+        """Return shell command for the sudo script"""
+        pass  # AbstractFile.shell_install()
+
+    def _install(self):
+        print(f"  [inst] {self.dst}")
+        """Install this file (either directly from python or via sudo script)"""
+        try:
+            self.chroot_dst.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+            self.direct_install()
+            self.chroot_dst.chmod(mode=0o0644)
+        except PermissionError:
+            SUDO_SCRIPT.add_cmd(self.shell_install(), comment=self.comment)
+
+    def _uninstall(self):
+        """Uninstall this file (either directly from python or via sudo script)
+
+        Like many other install/uninstall tools, we just remove the
+        file and leave the directory tree around.
+        """
+        print(f"  [rm] {self.dst}")
         try:
             self.chroot_dst.unlink()
         except FileNotFoundError:
-            pass  # No file to remove
-
-    def install_msg(self, dst):
-        print("  [inst]", dst)
-
-    def uninstall_msg(self, dst):
-        print("  [rm]", dst)
+            SUDO_SCRIPT.add_cmd(f"rm -f {self.dst}", skip_if=True, comment=self.comment)
+        except PermissionError:
+            SUDO_SCRIPT.add_cmd(f"rm -f {self.dst}", comment=self.comment)
 
 
 class CopyFile(AbstractFile):
     """This file just needs to be copied from a source file to the destination"""
 
-    def __init__(self, dst, src):
-        super(CopyFile, self).__init__(dst)
+    def __init__(self, dst, src, comment=None):
+        super(CopyFile, self).__init__(dst, comment=comment)
         self.__src = Path(src)
 
     @property
     def src(self):
         return self.__src
 
-    def install(self):
-        self.install_msg(self.dst)
-        self.chroot_dst.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
-        shutil.copy(self.src, self.chroot_dst)
-        self.chroot_dst.chmod(mode=0o644)
+    def direct_install(self):
+        shutil.copy2(self.src, self.chroot_dst)
+
+    def shell_install(self):
+        lines = [
+            f"mkdir -p {self.dst.parent.absolute()}",
+            f"cp -p {self.src.absolute()} {self.dst}",
+        ]
+        return "\n".join(lines)
 
 
 class StringToFile(AbstractFile):
     """This destination file is written from a string, no source file required"""
 
-    def __init__(self, dst, content):
-        super(StringToFile, self).__init__(dst)
+    def __init__(self, dst, content, comment=None):
+        super(StringToFile, self).__init__(dst, comment=comment)
 
         self.content = content
 
-    def install(self):
-        self.install_msg(self.dst)
-        self.chroot_dst.parent.mkdir(mode=0o0755, parents=True, exist_ok=True)
+    def direct_install(self):
         self.chroot_dst.write_text(self.content)
-        self.chroot_dst.chmod(mode=0o0644)
+
+    def shell_install(self):
+        lines = []
+        lines.append(f"cat>{self.dst}<<EOF")
+        lines.extend(self.content.splitlines())
+        lines.append("EOF")
+        return "\n".join(lines)
 
 
 class TemplateFile(CopyFile):
     """This destination file is a source file after string template processing"""
 
-    def __init__(self, dst, src, template_data=None):
-        super(TemplateFile, self).__init__(dst, src)
+    def __init__(self, dst, src, template_data=None, comment=None):
+        super(TemplateFile, self).__init__(dst, src, comment=comment)
 
         if template_data is None:
-            self.template_data = {}
-        else:
-            self.template_data = template_data
+            template_data = {}
 
-    def install(self):
-        self.install_msg(self.dst)
         src_template = Template(self.src.read_text())
-        self.chroot_dst.parent.mkdir(mode=0o0755, parents=True, exist_ok=True)
-        self.chroot_dst.write_text(src_template.substitute(self.template_data))
-        self.chroot_dst.chmod(mode=0o0644)
+        self.content = src_template.substitute(template_data)
+
+    def direct_install(self):
+        self.chroot_dst.write_text(self.content)
+
+    def shell_install(self):
+        lines = []
+        lines.append(f"cat>{self.dst}<<EOF")
+        lines.extend(self.content.splitlines())
+        lines.append("EOF")
+        return "\n".join(lines)
 
 
 class AbstractSetup(metaclass=abc.ABCMeta):
@@ -376,11 +416,11 @@ class FileSetup(AbstractSetup):
 
     def install(self):
         for file in sorted(self.files, key=FileSetup.destfile_key):
-            file.install()
+            file._install()
 
     def uninstall(self):
         for file in sorted(self.files, key=FileSetup.destfile_key, reverse=True):
-            file.uninstall()
+            file._uninstall()
 
 
 class DataFileSetup(FileSetup):
@@ -565,7 +605,7 @@ class SetupXDGDesktop(DataFileSetup):
             return dirs.datadir / f"icons/hicolor/{size}x{size}/apps"
 
 
-class SetupUdevRules(AbstractSetup):
+class SetupUdevRules(FileSetup):
     """Subsystem dealing with the udev rules"""
 
     def __init__(self):
@@ -573,10 +613,9 @@ class SetupUdevRules(AbstractSetup):
 
         # Generate the file contents in Python so we can install it
         # from Python in case we do have write permissions.
-        lines = []
-        lines.append(
+        lines = [
             "# Soundcraft Notepad series mixers with audio routing controlled by USB"
-        )
+        ]
         for product_id in const.PY_LIST_OF_PRODUCT_IDS:
             lines.append(
                 'ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="05fc", ATTRS{idProduct}=="%04x", TAG+="uaccess"'
@@ -585,13 +624,24 @@ class SetupUdevRules(AbstractSetup):
 
         self.udev_rules_content = "".join([f"{line}\n" for line in lines])
         self.udev_rules_dst = get_dirs().udev_rulesdir / f"70-{const.PACKAGE}.rules"
+        self.add_file(
+            StringToFile(
+                self.udev_rules_dst,
+                self.udev_rules_content,
+                comment="udev rules allowing non-root access to the USB device",
+            )
+        )
 
     def emit_code_for_rule_change(self, skip_if):
-        SUDO_SCRIPT.add_cmd(
-            "udevadm control --reload",
-            skip_if=skip_if,
-            comment="Make udev take notice of the updated set of udev rules",
-        )
+        # udev is supposed to be picking up changed rules "for years"
+        # (relative to 2016), so manually triggering a reload does not
+        # appear to be called for any more.
+        #
+        # SUDO_SCRIPT.add_cmd(
+        #     "udevadm control --reload",
+        #     skip_if=skip_if,
+        #     comment="Make udev take notice of the updated set of udev rules",
+        # )
 
         sh_list_of_product_ids = " ".join(
             ["%04x" % n for n in const.PY_LIST_OF_PRODUCT_IDS]
@@ -614,26 +664,11 @@ done""",
         if self.udev_rules_dst.exists():
             old_content[self.udev_rules_dst] = self.udev_rules_dst.read_text()
 
-        # FIXME: No chroot support.
+        super(SetupUdevRules, self).install()
 
-        # Populate with the files which we (should) have installed
+        # Populate with the files which we (should/will) have installed
         new_content = {}
-        try:
-            print(f"Installing file {self.udev_rules_dst}")
-            self.udev_rules_dst.parent.mkdir(mode=0o0755, parents=True, exist_ok=True)
-            self.udev_rules_dst.write_text(self.udev_rules_content)
-            print("Installed all udev rules files")
-            new_content[self.udev_rules_dst] = self.udev_rules_dst.read_text()
-        except PermissionError:
-            skip_if = self.udev_rules_dst.exists() and (
-                old_content[self.udev_rules_dst] == self.udev_rules_content
-            )
-            SUDO_SCRIPT.add_cmd(
-                f"mkdir -p {self.udev_rules_dst.parent}\ncat>{self.udev_rules_dst}<<EOF\n{self.udev_rules_content}EOF",
-                skip_if=skip_if,
-                comment="Install udev rules allowing non-root access to the USB device",
-            )
-            new_content[self.udev_rules_dst] = self.udev_rules_content
+        new_content[self.udev_rules_dst] = self.udev_rules_content
 
         from pprint import pprint
 
@@ -647,24 +682,17 @@ done""",
     def uninstall(self):
         # FIXME05: Do we even want to uninstall the udev rules if it
         #          is in /etc/udev/rules.d for a $HOME/.local install?
+        #          The next install will just need sudo access again
+        #          to install it again.
 
         old_content = {}
         if self.udev_rules_dst.exists():
             old_content[self.udev_rules_dst] = self.udev_rules_dst.read_text()
 
+        super(SetupUdevRules, self).uninstall()
+
         new_content = dict(old_content)
-        try:
-            self.udev_rules_dst.unlink()
-            print("Uninstalled all udev rules files")
-            del new_content[self.udev_rules_dst]
-        except FileNotFoundError:
-            print("No udev rules file to uninstall")
-        except PermissionError:
-            SUDO_SCRIPT.add_cmd(
-                f"rm -f {self.udev_rules_dst}",
-                skip_if=not self.udev_rules_dst.exists(),
-                comment="Uninstall udev rules allowing non-root access to the USB device",
-            )
+        if self.udev_rules_dst in new_content:
             del new_content[self.udev_rules_dst]
 
         from pprint import pprint
@@ -743,6 +771,7 @@ class SetupObsoleteInstall(AbstractSetup):
         if files_to_skip:
             SUDO_SCRIPT.add_cmd(
                 f"rm -f {skip_str}",
+                skip_if=True,
                 comment="Remove obsolete system D-Bus service config and script files (from pre-0.5.0)",
             )
 
