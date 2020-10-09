@@ -45,5 +45,12 @@ BASE_EXE_SETUP = "soundcraft_setup"
 APPLICATION_ID = "soundcraft.utils"
 
 
+# The complete set of D-Bus API strings
+BUSNAME = "soundcraft.utils.notepad"
+DEVICE_INTERFACE = f"{BUSNAME}.device"
+SERVICE_INTERFACE = BUSNAME
+MGRPATH = "/soundcraft/utils/notepad"
+
+
 # Helpful for removing remnants of soundcraft-utils 0.4.0 and earlier
 OLD_BASE_EXE_SERVICE = "soundcraft_dbus_service"

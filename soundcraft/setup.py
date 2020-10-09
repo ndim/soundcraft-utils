@@ -50,7 +50,6 @@ import pydbus
 import soundcraft
 
 import soundcraft.constants as const
-from soundcraft.dbus import BUSNAME
 
 
 def findDataFiles(subdir):
@@ -125,12 +124,12 @@ class AbstractSetup(metaclass=abc.ABCMeta):
 class SetupDBus(AbstractSetup):
     def __init__(self):
         super(SetupDBus, self).__init__()
-        self.service_dst = self.datadir / "dbus-1/services" / f"{BUSNAME}.service"
+        self.service_dst = self.datadir / "dbus-1/services" / f"{const.BUSNAME}.service"
 
     def install(self):
         templateData = {
             "dbus_service_bin": str(serviceExePath()),
-            "busname": BUSNAME,
+            "busname": const.BUSNAME,
         }
 
         sources = findDataFiles("dbus-1")
@@ -156,7 +155,7 @@ class SetupDBus(AbstractSetup):
         timeout = 5
         while True:
             try:
-                dbus_service.StartServiceByName(BUSNAME, 0)
+                dbus_service.StartServiceByName(const.BUSNAME, 0)
                 break  # service has been started, no need to try again
             except GLibError:
                 # If the bus has not recognized the service config file
@@ -169,7 +168,7 @@ class SetupDBus(AbstractSetup):
                 time.sleep(1)
                 continue  # starting service has failed, but try again
 
-        our_service = bus.get(BUSNAME)
+        our_service = bus.get(const.BUSNAME)
         service_version = our_service.version
         print(f"Service   version: {service_version}")
 
@@ -187,10 +186,10 @@ class SetupDBus(AbstractSetup):
     def uninstall(self):
         bus = pydbus.SessionBus()
         dbus_service = bus.get(".DBus")
-        if not dbus_service.NameHasOwner(BUSNAME):
+        if not dbus_service.NameHasOwner(const.BUSNAME):
             print("D-Bus service not running")
         else:
-            service = bus.get(BUSNAME)
+            service = bus.get(const.BUSNAME)
             service_version = service.version
             print(f"Shutting down D-Bus service version {service_version}")
             service.Shutdown()
