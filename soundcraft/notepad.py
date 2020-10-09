@@ -25,12 +25,11 @@ import json
 
 from pathlib import Path
 
-
 import usb.core
 
 import soundcraft.constants as const
 
-from soundcraft.dirs import find_statedir
+from soundcraft.dirs import get_dirs
 
 
 HARMAN_USB = 0x05FC
@@ -44,9 +43,16 @@ class NotepadBase:
             fixedRouting = []
         self.routingTarget = routingTarget
         self.fixedRouting = fixedRouting
+        self.dirs = get_dirs()
         if not stateDir:
-            stateDir = find_statedir()
+            stateDir = self.dirs.statedir
+        else:
+            # Note that the testsuite absolutely requires we convert
+            # whatever type stateDir is to a Path.
+            stateDir = Path(stateDir)
+        print("Using stateDir", repr(stateDir))
         self.dev = usb.core.find(idVendor=HARMAN_USB, idProduct=idProduct)
+        print("Found device", self.dev)
         if self.dev is not None:
             major = self.dev.bcdDevice >> 8
             minor = self.dev.bcdDevice & 0xFF
@@ -56,7 +62,8 @@ class NotepadBase:
                 # Fall-back to class name, since reading the product over USB requires write access
                 self.product = self.__class__.__name__
             self.fwVersion = "%d.%02d" % (major, minor)
-            self.stateFile = Path(stateDir) / f"{self.product}.state"
+            self.stateFile = stateDir / f"{self.product}.state"
+            print(self, "using stateFile", self.stateFile)
             self.state = {}
             self._loadState()
 
@@ -131,6 +138,7 @@ class NotepadBase:
 
     def _saveState(self):
         try:
+            print("self.stateFile", repr(self.stateFile))
             self.stateFile.parent.mkdir(mode=0o0755, parents=True, exist_ok=True)
             with open(self.stateFile, "w") as fh:
                 fh.write(json.dumps(self.state, sort_keys=True, indent=4))
@@ -218,8 +226,6 @@ class Notepad_5(NotepadBase):
 
 # Note: The stateDir parameter is required by the test suite.
 def autodetect(stateDir=None):
-    if not stateDir:
-        stateDir = find_statedir()
     for devClass in (Notepad_12fx, Notepad_8fx, Notepad_5):
         dev = devClass(stateDir=stateDir)
         if dev.found():
