@@ -44,9 +44,8 @@ class NotepadBase:
             fixedRouting = []
         self.routingTarget = routingTarget
         self.fixedRouting = fixedRouting
-        self.dirs = get_dirs()
         if not stateDir:
-            stateDir = self.dirs.statedir
+            stateDir = get_dirs().statedir
         else:
             # Note that the testsuite absolutely requires we convert
             # whatever type stateDir is to a Path.

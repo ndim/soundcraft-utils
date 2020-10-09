@@ -223,8 +223,8 @@ class SetupDBus(DataFileSetup):
         self.walk_through_data_files("dbus-1")
 
     def add_src(self, src):
-        dirs = get_dirs()
         if src.suffix == ".service":
+            dirs = get_dirs()
             templateData = {
                 "dbus_service_bin": str(dirs.serviceExePath),
                 "busname": const.BUSNAME,
@@ -306,8 +306,8 @@ class SetupXDGDesktop(DataFileSetup):
         self.walk_through_data_files("xdg")
 
     def add_src(self, src):
-        dirs = get_dirs()
         if src.suffix == ".desktop":
+            dirs = get_dirs()
             applications_dir = dirs.datadir / "applications"
             dst = applications_dir / f"{const.APPLICATION_ID}.desktop"
             templateData = {

@@ -47,11 +47,13 @@ from soundcraft.dirs import get_dirs
 
 
 def iconFile():
+    # For properly installed soundcraft-utils
     dirs = get_dirs()
     png = dirs.datadir / f"icons/hicolor/256x256/apps/{const.APPLICATION_ID}.png"
     if png.exists():
         return str(png)
 
+    # For soundcraft-utils running from source tree
     modulepaths = soundcraft.__path__
     for path in modulepaths:
         png = Path(path) / "data" / "xdg" / f"{const.APPLICATION_ID}.256.png"
