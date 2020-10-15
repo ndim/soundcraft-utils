@@ -23,6 +23,7 @@
 
 import abc
 import argparse
+import importlib
 import io
 import re
 import shutil
@@ -31,23 +32,6 @@ import time
 from pathlib import Path
 from string import Template
 
-
-try:
-    import gi  # noqa: F401 'gi' imported but unused
-except ModuleNotFoundError:
-    print(
-        """
-The PyGI library must be installed from your distribution; usually called
-python-gi, python-gobject, python3-gobject, pygobject, or something similar.
-"""
-    )
-    raise
-
-# We only need the whole gobject and GLib thing here to catch specific exceptions
-from gi.repository.GLib import Error as GLibError
-
-
-import pydbus
 
 import soundcraft
 
@@ -256,6 +240,104 @@ class AbstractSetup(metaclass=abc.ABCMeta):
         pass  # AbstractSetup.uninstall()
 
 
+class CheckDependencies(AbstractSetup):
+    """Make sure gi and the required typelibs are installed
+
+    This checks that all imports of external Python libraries work
+    and if they do not, attempts to show an error message useful
+    to find the software package to install.
+
+    Ideally, we want to detect missing package dependencies early
+    during the setup stage, not at some time when the user is running
+    the GUI or CLI programs.
+    """
+
+    def install(self):
+        # Note that re-raising the exception after printing our own
+        # error message is useful: It gives the user the hint about
+        # which packages need to be installed, but still shows the
+        # backtrace in case of an exception occuring which we had not
+        # foreseen might happen.
+
+        # If installing to a chroot environment, we cannot check what
+        # is installed in that chroot environment, and therefore skip
+        # the checks.
+        if get_dirs().chroot:
+            print("Installing to chroot, skipping module import checks.")
+            return
+
+        try:
+            import gi  # noqa: F401 'gi' imported but unused
+        except ModuleNotFoundError:
+            print(
+                "The PyGI library must be installed from your distribution; usually called python-gi, python-gobject, python3-gobject, pygobject, or something similar."
+            )
+            raise
+
+        for module, version in [
+            ("GLib", None),
+            ("Gtk", "3.0"),
+            ("Gio", None),
+            ("GUdev", "1.0"),
+        ]:
+            mod_name = f"gi.repository.{module}"
+
+            if version:
+                typelib = f"{module}-{version}.typelib"
+            else:
+                typelib = f"{module}-*.typelib"
+
+            if version:
+                try:
+                    print(f"Trying to require module {module} version {version}")
+                    gi.require_version(module, version)
+                except ValueError:
+                    print(
+                        f"Error: module '{mod_name}' not available in version %{version}. Make sure the package providing the '{typelib}' file is installed with the required dependencies."
+                    )
+                    raise
+
+            try:
+                print(f"Trying to import {mod_name}")
+                importlib.import_module(mod_name)  # import must work; discard retval
+            except ImportError:
+                print(
+                    f"Error importing module '{mod_name}'. Make sure the package providing the '{typelib}' file is installed with its required dependencies."
+                )
+                raise
+
+        # pydbus internally requires gi and GLib, Gio, GObject
+        try:
+            import pydbus  # noqa: F401 'pydbus' imported but unused
+        except Exception:
+            print(
+                "Error importing module pydbus. Make sure the pydbus package is installed."
+            )
+            raise
+
+        try:
+            import usb.core  # noqa: F401 'usb.core' imported but unused
+        except ModuleNotFoundError:
+            print(
+                f"Module 'usb.core' not found. Make sure the 'pyusb' package is installed."
+            )
+            raise
+        try:
+            # check that finding any USB device works
+            usb_devices = usb.core.find(find_all=True)
+            if len(list(usb_devices)) == 0:
+                raise
+                raise ValueError("No USB devices found")
+        except ValueError:
+            print("Error: No USB devices found. Something is broken here.")
+            raise
+
+        print("Checking installed packages: Good.")
+
+    def uninstall(self):
+        pass  # CheckDependencies.uninstall() does not need to do anything
+
+
 class FileSetup(AbstractSetup):
     """A subsystem which needs to install a number of files"""
 
@@ -360,6 +442,8 @@ class SetupDBus(DataFileSetup):
 
     def install(self):
         if not self.no_launch:
+            import pydbus
+
             bus = pydbus.SessionBus()
             dbus_service = bus.get(".DBus")
 
@@ -378,13 +462,16 @@ class SetupDBus(DataFileSetup):
             print("Starting D-Bus service as a test...")
             print(f"Installer version: {soundcraft.__version__}")
 
+            # CheckDependencies.install() has already checked this import works
+            import gi.repository.GLib
+
             # Give the D-Bus a few seconds to notice the new service file
             timeout = 5
             while True:
                 try:
                     dbus_service.StartServiceByName(const.BUSNAME, 0)
                     break  # service has been started, no need to try again
-                except GLibError:
+                except gi.repository.GLib.Error:
                     # If the bus has not recognized the service config file
                     # yet, the service is not bus activatable yet and thus the
                     # GLibError will happen.
@@ -412,6 +499,8 @@ class SetupDBus(DataFileSetup):
 
     def uninstall(self):
         if not self.no_launch:
+            import pydbus
+
             bus = pydbus.SessionBus()
             dbus_service = bus.get(".DBus")
             if not dbus_service.NameHasOwner(const.BUSNAME):
@@ -607,6 +696,8 @@ class SetupObsoleteInstall(AbstractSetup):
         """Stop the obsolete system bus service"""
         print("Stopping obsolete D-Bus service on the system bus (when possible)")
 
+        import pydbus
+
         old_busname = "soundcraft.utils"
         bus = pydbus.SystemBus()
         dbus_service = bus.get(".DBus")
@@ -737,6 +828,7 @@ def main():
     print("Using dirs", dirs)
 
     everything = SetupEverything()
+    everything.add(CheckDependencies())
     everything.add(SetupObsoleteInstall())
     everything.add(SetupDBus(no_launch=args.no_launch))
     everything.add(SetupXDGDesktop())
