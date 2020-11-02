@@ -84,7 +84,7 @@ class SudoScript:
     def __init__(self):
         self.sudo_commands = []
 
-    def add_cmd(self, cmd, skip_if=True, comment=None):
+    def add_cmd(self, cmd, skip_if=False, comment=None):
         """Add a command to the sudo script"""
         if skip_if:
             c = ScriptCommand(cmd, skip_if=True, comment=comment)
