@@ -439,6 +439,118 @@ class SetupXDGDesktop(DataFileSetup):
             return dirs.datadir / f"icons/hicolor/{size}x{size}/apps"
 
 
+class SetupUdevRules(AbstractSetup):
+    """Subsystem dealing with the udev rules"""
+
+    def __init__(self):
+        super(SetupUdevRules, self).__init__()
+
+        # Generate the file contents in Python so we can install it
+        # from Python in case we do have write permissions.
+        lines = []
+        lines.append(
+            "# Soundcraft Notepad series mixers with audio routing controlled by USB"
+        )
+        for product_id in const.PY_LIST_OF_PRODUCT_IDS:
+            lines.append(
+                'ACTION=="add", SUBSYSTEM=="usb", ATTRS{idVendor}=="05fc", ATTRS{idProduct}=="%04x", TAG+="uaccess"'
+                % product_id
+            )
+
+        self.udev_rules_content = "".join([f"{line}\n" for line in lines])
+        self.udev_rules_dst = get_dirs().udev_rulesdir / f"70-{const.PACKAGE}.rules"
+
+    def emit_code_for_rule_change(self, skip_if):
+        SUDO_SCRIPT.add_cmd(
+            "udevadm control --reload",
+            skip_if=skip_if,
+            comment="Make udev take notice of the updated set of udev rules",
+        )
+
+        sh_list_of_product_ids = " ".join(
+            ["%04x" % n for n in const.PY_LIST_OF_PRODUCT_IDS]
+        )
+        SUDO_SCRIPT.add_cmd(
+            f"""\
+for product_id in {sh_list_of_product_ids}
+do
+    udevadm trigger --verbose \\
+        --action=add --subsystem-match=usb \\
+        --attr-match=idVendor=05fc --attr-match=idProduct=${{product_id}}
+done""",
+            skip_if=skip_if,
+            comment="Trigger udev rules which run when adding existing mixer devices",
+        )
+
+    def install(self):
+        # Populate with the files installed pre installation
+        old_content = {}
+        if self.udev_rules_dst.exists():
+            old_content[self.udev_rules_dst] = self.udev_rules_dst.read_text()
+
+        # FIXME: No chroot support.
+
+        # Populate with the files which we (should) have installed
+        new_content = {}
+        try:
+            print(f"Installing file {self.udev_rules_dst}")
+            self.udev_rules_dst.parent.mkdir(mode=0o0755, parents=True, exist_ok=True)
+            self.udev_rules_dst.write_text(self.udev_rules_content)
+            print("Installed all udev rules files")
+            new_content[self.udev_rules_dst] = self.udev_rules_dst.read_text()
+        except PermissionError:
+            skip_if = self.udev_rules_dst.exists() and (
+                old_content[self.udev_rules_dst] == self.udev_rules_content
+            )
+            SUDO_SCRIPT.add_cmd(
+                f"mkdir -p {self.udev_rules_dst.parent}\ncat>{self.udev_rules_dst}<<EOF\n{self.udev_rules_content}EOF",
+                skip_if=skip_if,
+                comment="Install udev rules allowing non-root access to the USB device",
+            )
+            new_content[self.udev_rules_dst] = self.udev_rules_content
+
+        from pprint import pprint
+
+        print("OLD")
+        pprint(old_content)
+        print("NEW")
+        pprint(new_content)
+
+        self.emit_code_for_rule_change(skip_if=(new_content == old_content))
+
+    def uninstall(self):
+        # FIXME05: Do we even want to uninstall the udev rules if it
+        #          is in /etc/udev/rules.d for a $HOME/.local install?
+
+        old_content = {}
+        if self.udev_rules_dst.exists():
+            old_content[self.udev_rules_dst] = self.udev_rules_dst.read_text()
+
+        new_content = dict(old_content)
+        try:
+            self.udev_rules_dst.unlink()
+            print("Uninstalled all udev rules files")
+            del new_content[self.udev_rules_dst]
+        except FileNotFoundError:
+            print("No udev rules file to uninstall")
+        except PermissionError:
+            SUDO_SCRIPT.add_cmd(
+                f"rm -f {self.udev_rules_dst}",
+                skip_if=not self.udev_rules_dst.exists(),
+                comment="Uninstall udev rules allowing non-root access to the USB device",
+            )
+            del new_content[self.udev_rules_dst]
+
+        from pprint import pprint
+
+        print("OLD")
+        pprint(old_content)
+        print("NEW")
+        pprint(new_content)
+
+        self.emit_code_for_rule_change(skip_if=(new_content == old_content))
+
+
 class SetupEverything(AbstractSetup):
     """Groups all subsystem setup tasks"""
 
@@ -522,6 +634,7 @@ def main():
     everything = SetupEverything()
     everything.add(SetupDBus(no_launch=args.no_launch))
     everything.add(SetupXDGDesktop())
+    everything.add(SetupUdevRules())
 
     if args.install:
         everything.install()
